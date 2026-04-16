@@ -642,6 +642,10 @@ def replace_customer_logo(
 ) -> int:
     """Upload logo to Drive and replace all 'Customer Logo' placeholder shapes.
 
+    Uses domain-internal sharing to avoid 'publishOutNotPermitted' errors on
+    Google Workspace accounts that block public file sharing.  Falls back to
+    a manual find-and-replace approach if replaceAllShapesWithImage fails.
+
     Returns the number of occurrences replaced.
     """
     media = MediaInMemoryUpload(logo_bytes, mimetype=logo_mime, resumable=False)
@@ -651,12 +655,34 @@ def replace_customer_logo(
     ).execute()
     file_id = uploaded["id"]
 
-    drive_service.permissions().create(
-        fileId=file_id,
-        body={"role": "reader", "type": "anyone"},
-    ).execute()
+    # Try public sharing first; if org policy blocks it, fall back to
+    # domain sharing or skip (replaceAllShapesWithImage needs a readable URL).
+    image_url = None
+    for perm_body in [
+        {"role": "reader", "type": "anyone"},
+        {"role": "reader", "type": "domain", "domain": "amplitude.com"},
+    ]:
+        try:
+            drive_service.permissions().create(
+                fileId=file_id, body=perm_body,
+            ).execute()
+            image_url = f"https://lh3.googleusercontent.com/d/{file_id}"
+            break
+        except HttpError:
+            continue
 
-    image_url = f"https://drive.google.com/uc?id={file_id}"
+    if not image_url:
+        if on_progress:
+            on_progress(
+                "Could not share logo file (org policy). "
+                "Falling back to manual placeholder replacement..."
+            )
+        total = _replace_logo_manual(
+            slides_service, presentation_id, file_id, drive_service,
+            logo_bytes, logo_mime, on_progress,
+        )
+        _cleanup_drive_file(drive_service, file_id)
+        return total
 
     logo_placeholders = ["Customer Logo"]
     total = 0
@@ -680,17 +706,98 @@ def replace_customer_logo(
                 total += count
                 if on_progress:
                     on_progress(f"Replaced '{ph}' with logo image ({count} occurrences)")
-        except HttpError:
-            pass
+        except HttpError as e:
+            if on_progress:
+                on_progress(f"replaceAllShapesWithImage failed for '{ph}': {e}")
+            manual = _replace_logo_manual(
+                slides_service, presentation_id, file_id, drive_service,
+                logo_bytes, logo_mime, on_progress,
+            )
+            total += manual
+            break
 
+    _cleanup_drive_file(drive_service, file_id)
+
+    if total == 0 and on_progress:
+        on_progress("Warning: no 'Customer Logo' placeholders found to replace")
+    return total
+
+
+def _cleanup_drive_file(drive_service, file_id: str):
     try:
         drive_service.files().delete(fileId=file_id).execute()
     except HttpError:
         pass
 
-    if total == 0 and on_progress:
-        on_progress("Warning: no 'Customer Logo' placeholders found to replace")
-    return total
+
+def _replace_logo_manual(
+    slides_service,
+    presentation_id: str,
+    file_id: str,
+    drive_service,
+    logo_bytes: bytes,
+    logo_mime: str,
+    on_progress: Callable = None,
+) -> int:
+    """Fallback: find 'Customer Logo' text boxes, note their position/size,
+    delete them, and insert a createImage at the same location using a
+    Google Drive content URL that the authenticated user can access."""
+
+    presentation = slides_service.presentations().get(
+        presentationId=presentation_id,
+    ).execute()
+    slides = presentation.get("slides", [])
+
+    placeholders = []
+    for slide in slides:
+        page_id = slide["objectId"]
+        for el in slide.get("pageElements", []):
+            text = get_element_text(el)
+            if text and "customer logo" in text.lower().strip():
+                transform = el.get("transform", {})
+                size = el.get("size", {})
+                placeholders.append({
+                    "element_id": el["objectId"],
+                    "page_id": page_id,
+                    "size": size,
+                    "transform": transform,
+                })
+
+    if not placeholders:
+        if on_progress:
+            on_progress("No 'Customer Logo' placeholder shapes found")
+        return 0
+
+    # Use the lh3 content URL which is accessible to anyone in the same
+    # Google Workspace domain without public sharing.
+    image_url = f"https://lh3.googleusercontent.com/d/{file_id}"
+
+    requests = []
+    for ph in placeholders:
+        requests.append({"deleteObject": {"objectId": ph["element_id"]}})
+        requests.append({
+            "createImage": {
+                "url": image_url,
+                "elementProperties": {
+                    "pageObjectId": ph["page_id"],
+                    "size": ph["size"],
+                    "transform": ph["transform"],
+                },
+            }
+        })
+
+    try:
+        slides_service.presentations().batchUpdate(
+            presentationId=presentation_id,
+            body={"requests": requests},
+        ).execute()
+        if on_progress:
+            on_progress(f"Replaced {len(placeholders)} logo placeholder(s) (manual method)")
+        return len(placeholders)
+    except HttpError as e:
+        if on_progress:
+            on_progress(f"Manual logo replacement also failed: {e}")
+        return 0
 
 
 def scan_slides(
