@@ -554,8 +554,8 @@
         </div>
 
         <div class="form-full">
-          <label for="customer_logo">Customer Logo <span style="font-weight:400;color:var(--text-2)">(optional — replaces "Customer Logo" placeholders)</span></label>
-          <input type="file" id="customer_logo" name="customer_logo" accept="image/png,image/jpeg,image/svg+xml,image/webp" style="padding:8px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-size:14px;width:100%;">
+          <label for="customer_logo_url">Customer Logo URL <span style="font-weight:400;color:var(--text-2)">(optional — publicly accessible image URL, e.g. from the company website)</span></label>
+          <input type="url" id="customer_logo_url" name="customer_logo_url" placeholder="https://example.com/logo.png" style="padding:10px 12px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-size:14px;width:100%;">
         </div>
 
         <div class="form-full">
@@ -747,9 +747,9 @@
         fd.append('customer_name', document.getElementById('customer_name').value);
         fd.append('folder_id', document.getElementById('folder_id').value);
 
-        const logoInput = document.getElementById('customer_logo');
-        if (logoInput?.files?.length) {
-          fd.append('customer_logo', logoInput.files[0]);
+        const logoUrl = document.getElementById('customer_logo_url').value.trim();
+        if (logoUrl) {
+          fd.append('customer_logo_url', logoUrl);
         }
 
         if (templateSelect.value === 'psp_kickoff') {
