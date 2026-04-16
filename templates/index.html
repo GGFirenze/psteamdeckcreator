@@ -1,0 +1,970 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Deck Creator</title>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --surface-2: #232733;
+      --border: #2e3240;
+      --text: #e4e6ed;
+      --text-2: #9498a8;
+      --accent: #6c5ce7;
+      --accent-hover: #7c6ff7;
+      --red: #e74c3c;
+      --red-bg: rgba(231,76,60,.12);
+      --yellow: #f39c12;
+      --yellow-bg: rgba(243,156,18,.12);
+      --green: #27ae60;
+      --green-bg: rgba(39,174,96,.12);
+      --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      --mono: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+      --radius: 8px;
+      --radius-lg: 12px;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+      min-height: 100vh;
+    }
+
+    .container { max-width: 920px; margin: 0 auto; padding: 32px 24px 64px; }
+
+    /* Header */
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 40px;
+      padding-bottom: 24px;
+      border-bottom: 1px solid var(--border);
+    }
+    .header h1 { font-size: 22px; font-weight: 600; letter-spacing: -0.3px; }
+    .header h1 span { color: var(--accent); }
+
+    .auth-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      padding: 6px 14px;
+      border-radius: 20px;
+      text-decoration: none;
+      transition: background .15s;
+    }
+    .auth-badge.connected { background: var(--green-bg); color: var(--green); }
+    .auth-badge.disconnected { background: var(--surface); color: var(--text-2); border: 1px solid var(--border); }
+    .auth-badge.disconnected:hover { background: var(--surface-2); }
+    .auth-dot { width: 7px; height: 7px; border-radius: 50%; }
+    .auth-badge.connected .auth-dot { background: var(--green); }
+    .auth-badge.disconnected .auth-dot { background: var(--text-2); }
+
+    /* Auth wall */
+    .auth-wall {
+      text-align: center;
+      padding: 80px 24px;
+    }
+    .auth-wall p { color: var(--text-2); margin: 12px 0 28px; font-size: 15px; }
+    .auth-wall .btn-primary { font-size: 15px; padding: 12px 32px; }
+
+    /* Forms */
+    label { display: block; font-size: 13px; font-weight: 500; color: var(--text-2); margin-bottom: 6px; }
+    input[type="text"], select {
+      width: 100%;
+      padding: 10px 14px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      font-size: 14px;
+      font-family: var(--font);
+      transition: border-color .15s;
+    }
+    input[type="text"]:focus, select:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+
+    .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    .form-full { grid-column: 1 / -1; }
+
+    fieldset {
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px;
+      margin: 0;
+    }
+    fieldset legend {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-2);
+      padding: 0 6px;
+    }
+
+    .checkbox-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
+    .checkbox-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    .checkbox-item input[type="checkbox"] {
+      width: 16px;
+      height: 16px;
+      accent-color: var(--accent);
+      cursor: pointer;
+    }
+
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 0;
+    }
+    .toggle-row span { font-size: 14px; }
+
+    .toggle {
+      position: relative;
+      width: 40px;
+      height: 22px;
+    }
+    .toggle input { opacity: 0; width: 0; height: 0; }
+    .toggle .slider {
+      position: absolute;
+      inset: 0;
+      background: var(--surface-2);
+      border-radius: 22px;
+      cursor: pointer;
+      transition: background .2s;
+    }
+    .toggle .slider::before {
+      content: '';
+      position: absolute;
+      top: 3px;
+      left: 3px;
+      width: 16px;
+      height: 16px;
+      background: var(--text-2);
+      border-radius: 50%;
+      transition: transform .2s, background .2s;
+    }
+    .toggle input:checked + .slider { background: var(--accent); }
+    .toggle input:checked + .slider::before { transform: translateX(18px); background: #fff; }
+
+    /* Buttons */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 20px;
+      border: none;
+      border-radius: var(--radius);
+      font-size: 14px;
+      font-weight: 500;
+      font-family: var(--font);
+      cursor: pointer;
+      transition: background .15s, opacity .15s;
+    }
+    .btn:disabled { opacity: .5; cursor: not-allowed; }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
+    .btn-ghost { background: transparent; color: var(--text-2); border: 1px solid var(--border); }
+    .btn-ghost:hover:not(:disabled) { background: var(--surface); }
+    .btn-danger { background: var(--red); color: #fff; }
+    .btn-danger:hover:not(:disabled) { background: #c0392b; }
+
+    .actions { display: flex; gap: 12px; margin-top: 28px; }
+
+    /* Sections */
+    .section { margin-top: 32px; }
+    .section-title {
+      font-size: 15px;
+      font-weight: 600;
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .section-title .count {
+      font-size: 12px;
+      font-weight: 500;
+      background: var(--surface-2);
+      color: var(--text-2);
+      padding: 2px 8px;
+      border-radius: 10px;
+    }
+
+    /* Progress log */
+    .progress-log {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 20px;
+      font-family: var(--mono);
+      font-size: 13px;
+      line-height: 1.8;
+      max-height: 280px;
+      overflow-y: auto;
+    }
+    .progress-log .step { display: flex; align-items: flex-start; gap: 10px; }
+    .progress-log .step-icon { flex-shrink: 0; width: 18px; text-align: center; }
+    .progress-log .step-msg { color: var(--text-2); }
+    .progress-log .step.done .step-icon { color: var(--green); }
+    .progress-log .step.active .step-icon { color: var(--accent); }
+    .progress-log .step.error .step-icon { color: var(--red); }
+
+    .spinner {
+      display: inline-block;
+      width: 14px;
+      height: 14px;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin .6s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Slide table */
+    .slide-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .slide-table th {
+      text-align: left;
+      font-weight: 500;
+      color: var(--text-2);
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: .5px;
+    }
+    .slide-table td {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+    }
+    .slide-table tr:last-child td { border-bottom: none; }
+    .slide-table tr.row-delete { background: var(--red-bg); }
+    .slide-table tr.row-keep { }
+
+    .label-pill {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 12px;
+      font-family: var(--mono);
+      margin: 1px 2px;
+      max-width: 220px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .label-pill.red { background: var(--red-bg); color: var(--red); }
+    .label-pill.yellow { background: var(--yellow-bg); color: var(--yellow); }
+
+    .decision-toggle {
+      display: inline-flex;
+      border-radius: 6px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+    }
+    .decision-toggle button {
+      padding: 4px 12px;
+      border: none;
+      background: transparent;
+      color: var(--text-2);
+      font-size: 12px;
+      font-family: var(--font);
+      cursor: pointer;
+      transition: background .15s, color .15s;
+    }
+    .decision-toggle button.active-keep { background: var(--green-bg); color: var(--green); }
+    .decision-toggle button.active-delete { background: var(--red-bg); color: var(--red); }
+
+    /* Colour debug */
+    .debug-toggle {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: none;
+      border: 1px solid var(--border);
+      color: var(--text-2);
+      padding: 8px 16px;
+      border-radius: var(--radius);
+      font-size: 13px;
+      font-family: var(--font);
+      cursor: pointer;
+      margin-bottom: 16px;
+      transition: background .15s;
+    }
+    .debug-toggle:hover { background: var(--surface); }
+    .debug-toggle .arrow { transition: transform .2s; }
+    .debug-toggle.open .arrow { transform: rotate(90deg); }
+
+    .debug-panel { display: none; }
+    .debug-panel.open { display: block; }
+
+    .colour-table { width: 100%; border-collapse: collapse; font-size: 12px; font-family: var(--mono); }
+    .colour-table th {
+      text-align: left;
+      font-weight: 500;
+      color: var(--text-2);
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--border);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: .5px;
+    }
+    .colour-table td { padding: 8px 10px; border-bottom: 1px solid var(--border); }
+    .colour-table tr:last-child td { border-bottom: none; }
+
+    .swatch {
+      display: inline-block;
+      width: 20px;
+      height: 20px;
+      border-radius: 4px;
+      border: 1px solid var(--border);
+      vertical-align: middle;
+    }
+    .match-badge {
+      display: inline-block;
+      padding: 1px 6px;
+      border-radius: 3px;
+      font-size: 11px;
+    }
+    .match-badge.yes { background: var(--green-bg); color: var(--green); }
+    .match-badge.no { background: var(--surface-2); color: var(--text-2); }
+
+    .threshold-info {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+    .threshold-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 12px 16px;
+    }
+    .threshold-card h4 { font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+    .threshold-card code { font-family: var(--mono); font-size: 12px; color: var(--text-2); }
+
+    /* Result banner */
+    .result-banner {
+      background: var(--green-bg);
+      border: 1px solid rgba(39,174,96,.25);
+      border-radius: var(--radius-lg);
+      padding: 24px;
+      text-align: center;
+    }
+    .result-banner h3 { color: var(--green); font-size: 16px; margin-bottom: 8px; }
+    .result-banner p { color: var(--text-2); font-size: 14px; margin-bottom: 16px; }
+    .result-banner a {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--accent);
+      text-decoration: none;
+      font-weight: 500;
+    }
+    .result-banner a:hover { text-decoration: underline; }
+
+    .result-stats {
+      display: flex;
+      justify-content: center;
+      gap: 32px;
+      margin-top: 16px;
+    }
+    .result-stat { text-align: center; }
+    .result-stat .value { font-size: 24px; font-weight: 700; }
+    .result-stat .label { font-size: 12px; color: var(--text-2); }
+
+    /* Error banner */
+    .error-banner {
+      background: var(--red-bg);
+      border: 1px solid rgba(231,76,60,.25);
+      border-radius: var(--radius);
+      padding: 16px;
+      font-size: 14px;
+      color: var(--red);
+      margin-top: 16px;
+    }
+
+    /* Utilities */
+    .hidden { display: none !important; }
+    .mt-16 { margin-top: 16px; }
+    .mt-24 { margin-top: 24px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+
+    <!-- Header -->
+    <div class="header">
+      <h1><span>Deck</span> Creator</h1>
+      {% if authenticated %}
+        <a href="/oauth/logout" class="auth-badge connected">
+          <span class="auth-dot"></span> Connected
+        </a>
+      {% else %}
+        <a href="/oauth/start" class="auth-badge disconnected">
+          <span class="auth-dot"></span> Not connected
+        </a>
+      {% endif %}
+    </div>
+
+    {% if not authenticated %}
+    <!-- Auth wall -->
+    <div class="auth-wall">
+      <h2>Connect your Google account</h2>
+      <p>
+        Deck Creator needs access to Google Slides and Drive to duplicate
+        templates and customise decks.
+      </p>
+      <a href="/oauth/start" class="btn btn-primary">Authorize with Google</a>
+    </div>
+    {% else %}
+
+    <!-- Config Form -->
+    <form id="configForm">
+      <div class="form-grid">
+        <div>
+          <label for="template">Template</label>
+          <select id="template" name="template">
+            {% for key, tmpl in templates.items() %}
+            <option value="{{ key }}">{{ tmpl.name }}</option>
+            {% endfor %}
+            <option value="custom">Custom URL</option>
+          </select>
+        </div>
+        <div>
+          <label for="customer_name">Customer Name</label>
+          <input type="text" id="customer_name" name="customer_name" placeholder="e.g. JPMC Fintech" autocomplete="off">
+        </div>
+
+        <div id="customUrlGroup" class="form-full hidden">
+          <div class="form-grid">
+            <div>
+              <label for="custom_url">Google Slides URL</label>
+              <input type="text" id="custom_url" name="custom_url" placeholder="https://docs.google.com/presentation/d/...">
+            </div>
+            <div>
+              <label for="custom_placeholder">Placeholder Text</label>
+              <input type="text" id="custom_placeholder" name="custom_placeholder" value="Customer Name">
+            </div>
+          </div>
+        </div>
+
+        <!-- PSP Kickoff fields -->
+        <div id="pspFields" class="form-full hidden">
+          <div class="form-grid">
+            <div>
+              <label for="psp_tier">PSP Tier</label>
+              <select id="psp_tier" name="psp_tier">
+                <option value="">Select tier...</option>
+                <option value="Basic">Basic</option>
+                <option value="Advanced">Advanced</option>
+                <option value="Signature">Signature</option>
+              </select>
+            </div>
+            <div>
+              <label for="psp_segment">Customer Segment</label>
+              <select id="psp_segment" name="psp_segment">
+                <option value="">Select segment...</option>
+                <option value="emerging_major_ent">Emerging / Major ENT</option>
+                <option value="strategic">Strategic</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <!-- Implementation Walkthrough fields -->
+        <div id="implFields">
+        <div class="form-full">
+          <fieldset>
+            <legend>SDK Types</legend>
+            <div class="checkbox-grid">
+              {% for name in filters.sdk_types %}
+              <label class="checkbox-item">
+                <input type="checkbox" name="sdk_types" value="{{ name }}">
+                {{ name }}
+              </label>
+              {% endfor %}
+            </div>
+          </fieldset>
+        </div>
+
+        <div class="form-grid">
+        <div>
+          <fieldset>
+            <legend>Import Sources</legend>
+            <div class="checkbox-grid" style="grid-template-columns: 1fr;">
+              {% for name in filters.import_sources %}
+              <label class="checkbox-item">
+                <input type="checkbox" name="import_sources" value="{{ name }}">
+                {{ name }}
+              </label>
+              {% endfor %}
+            </div>
+          </fieldset>
+        </div>
+
+        <div>
+          <fieldset>
+            <legend>Tag Managers</legend>
+            <div class="checkbox-grid" style="grid-template-columns: 1fr;">
+              {% for name in filters.tag_managers %}
+              <label class="checkbox-item">
+                <input type="checkbox" name="tag_managers" value="{{ name }}">
+                {{ name }}
+              </label>
+              {% endfor %}
+            </div>
+          </fieldset>
+        </div>
+        </div>
+
+        <div class="form-full">
+          <fieldset>
+            <legend>Other Options</legend>
+            <div class="toggle-row">
+              <span>3rd Party Analytics</span>
+              <label class="toggle">
+                <input type="checkbox" id="third_party" name="third_party">
+                <span class="slider"></span>
+              </label>
+            </div>
+            <div class="toggle-row">
+              <span>Mobile Autocapture</span>
+              <label class="toggle">
+                <input type="checkbox" id="mobile_autocapture" name="mobile_autocapture">
+                <span class="slider"></span>
+              </label>
+            </div>
+          </fieldset>
+        </div>
+        </div>
+
+        <div class="form-full">
+          <label for="folder_id">Google Drive Folder ID <span style="font-weight:400;color:var(--text-2)">(optional)</span></label>
+          <input type="text" id="folder_id" name="folder_id" placeholder="Leave blank for My Drive root">
+        </div>
+      </div>
+
+      <div class="actions">
+        <button type="submit" class="btn btn-primary" id="scanBtn">
+          Create Deck
+        </button>
+      </div>
+    </form>
+
+    <!-- Progress Log -->
+    <div id="progressSection" class="section hidden">
+      <div class="section-title">Progress</div>
+      <div class="progress-log" id="progressLog"></div>
+    </div>
+
+    <!-- Error -->
+    <div id="errorBanner" class="error-banner hidden"></div>
+
+    <!-- Slide Preview Table -->
+    <div id="previewSection" class="section hidden">
+      <div class="section-title">
+        Slide Decisions
+        <span class="count" id="slideCount"></span>
+      </div>
+      <div style="overflow-x:auto; border:1px solid var(--border); border-radius:var(--radius-lg);">
+        <table class="slide-table">
+          <thead>
+            <tr>
+              <th style="width:50px">#</th>
+              <th>Title</th>
+              <th id="labelsColHeader">Labels / Markers</th>
+              <th style="width:130px">Decision</th>
+            </tr>
+          </thead>
+          <tbody id="slideTableBody"></tbody>
+        </table>
+      </div>
+
+      <div class="actions">
+        <button class="btn btn-primary" id="executeBtn">Apply Changes</button>
+        <button class="btn btn-ghost" id="cancelBtn">Cancel</button>
+      </div>
+    </div>
+
+    <!-- Colour Debug Panel -->
+    <div id="debugSection" class="section hidden">
+      <button class="debug-toggle" id="debugToggle">
+        <span class="arrow">&#9654;</span>
+        Colour Diagnostics
+        <span class="count" id="debugCount"></span>
+      </button>
+      <div class="debug-panel" id="debugPanel">
+        <div class="threshold-info" id="thresholdInfo"></div>
+        <div style="overflow-x:auto; border:1px solid var(--border); border-radius:var(--radius-lg);">
+          <table class="colour-table">
+            <thead>
+              <tr>
+                <th>Slide</th>
+                <th>Colour</th>
+                <th>RGB</th>
+                <th>Hex</th>
+                <th>Red?</th>
+                <th>Yellow?</th>
+                <th>Text</th>
+              </tr>
+            </thead>
+            <tbody id="debugTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Result Banner -->
+    <div id="resultSection" class="section hidden">
+      <div class="result-banner">
+        <h3>Deck created successfully</h3>
+        <p id="resultMsg"></p>
+        <a id="resultLink" href="#" target="_blank">
+          Open in Google Slides &#8594;
+        </a>
+        <div class="result-stats">
+          <div class="result-stat">
+            <div class="value" id="statRemaining">--</div>
+            <div class="label">Slides kept</div>
+          </div>
+          <div class="result-stat">
+            <div class="value" id="statDeleted">--</div>
+            <div class="label">Slides removed</div>
+          </div>
+        </div>
+      </div>
+      <div class="actions">
+        <button class="btn btn-ghost" onclick="location.reload()">Create Another</button>
+      </div>
+    </div>
+
+    {% endif %}
+  </div>
+
+  <script>
+    const form = document.getElementById('configForm');
+    const templateSelect = document.getElementById('template');
+    const customUrlGroup = document.getElementById('customUrlGroup');
+    const pspFields = document.getElementById('pspFields');
+    const implFields = document.getElementById('implFields');
+    const progressSection = document.getElementById('progressSection');
+    const progressLog = document.getElementById('progressLog');
+    const errorBanner = document.getElementById('errorBanner');
+    const previewSection = document.getElementById('previewSection');
+    const debugSection = document.getElementById('debugSection');
+    const resultSection = document.getElementById('resultSection');
+
+    let currentJobId = null;
+    let currentDecisions = {};
+    let currentTemplateType = 'implementation';
+
+    function updateFormVisibility() {
+      const val = templateSelect?.value || 'implementation';
+      currentTemplateType = val;
+      customUrlGroup?.classList.toggle('hidden', val !== 'custom');
+      pspFields?.classList.toggle('hidden', val !== 'psp_kickoff');
+      implFields?.classList.toggle('hidden', val === 'psp_kickoff' || val === 'custom');
+    }
+
+    if (templateSelect) {
+      templateSelect.addEventListener('change', updateFormVisibility);
+      updateFormVisibility();
+    }
+
+    const debugToggle = document.getElementById('debugToggle');
+    const debugPanel = document.getElementById('debugPanel');
+    if (debugToggle) {
+      debugToggle.addEventListener('click', () => {
+        debugToggle.classList.toggle('open');
+        debugPanel.classList.toggle('open');
+      });
+    }
+
+    function addProgressStep(msg, state = 'done') {
+      const icons = { done: '&#10003;', active: '<span class="spinner"></span>', error: '&#10007;' };
+      const div = document.createElement('div');
+      div.className = `step ${state}`;
+      div.innerHTML = `<span class="step-icon">${icons[state]}</span><span class="step-msg">${escHtml(msg)}</span>`;
+      progressLog.appendChild(div);
+      progressLog.scrollTop = progressLog.scrollHeight;
+      return div;
+    }
+
+    function showError(msg) {
+      errorBanner.textContent = msg;
+      errorBanner.classList.remove('hidden');
+    }
+
+    function escHtml(s) {
+      const d = document.createElement('div');
+      d.textContent = s;
+      return d.innerHTML;
+    }
+
+    function getCheckedValues(name) {
+      return Array.from(document.querySelectorAll(`input[name="${name}"]:checked`)).map(el => el.value);
+    }
+
+    // Phase 1: Scan
+    if (form) {
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        errorBanner.classList.add('hidden');
+        previewSection.classList.add('hidden');
+        debugSection.classList.add('hidden');
+        resultSection.classList.add('hidden');
+        progressLog.innerHTML = '';
+        progressSection.classList.remove('hidden');
+
+        const scanBtn = document.getElementById('scanBtn');
+        scanBtn.disabled = true;
+        scanBtn.innerHTML = '<span class="spinner"></span> Working...';
+
+        const loadingStep = addProgressStep('Starting deck creation...', 'active');
+
+        const payload = {
+          template: templateSelect.value,
+          customer_name: document.getElementById('customer_name').value,
+          folder_id: document.getElementById('folder_id').value,
+        };
+
+        if (templateSelect.value === 'psp_kickoff') {
+          payload.psp_tier = document.getElementById('psp_tier').value;
+          payload.psp_segment = document.getElementById('psp_segment').value;
+        } else if (templateSelect.value === 'custom') {
+          payload.custom_url = document.getElementById('custom_url')?.value || '';
+          payload.custom_placeholder = document.getElementById('custom_placeholder')?.value || '';
+        } else {
+          payload.sdk_types = getCheckedValues('sdk_types');
+          payload.import_sources = getCheckedValues('import_sources');
+          payload.tag_managers = getCheckedValues('tag_managers');
+          payload.third_party = document.getElementById('third_party')?.checked || false;
+          payload.mobile_autocapture = document.getElementById('mobile_autocapture')?.checked || false;
+        }
+
+        try {
+          const resp = await fetch('/api/scan', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+          const data = await resp.json();
+
+          loadingStep.remove();
+
+          if (data.error) {
+            if (data.steps) data.steps.forEach(s => addProgressStep(s.message));
+            addProgressStep(data.error, 'error');
+            showError(data.error);
+            scanBtn.disabled = false;
+            scanBtn.innerHTML = 'Create Deck';
+            return;
+          }
+
+          data.steps.forEach(s => addProgressStep(s.message));
+
+          currentJobId = data.job_id;
+          currentDecisions = {};
+          data.slides.forEach(s => { currentDecisions[s.slide_id] = s.decision; });
+
+          renderSlideTable(data.slides);
+          previewSection.classList.remove('hidden');
+
+          if (data.colour_debug && data.colour_debug.length > 0) {
+            renderDebugPanel(data.colour_debug, data.thresholds);
+            debugSection.classList.remove('hidden');
+          }
+
+        } catch (err) {
+          loadingStep.remove();
+          addProgressStep(err.message, 'error');
+          showError('Network error: ' + err.message);
+        }
+
+        scanBtn.disabled = false;
+        scanBtn.innerHTML = 'Create Deck';
+      });
+    }
+
+    function renderSlideTable(slides) {
+      const tbody = document.getElementById('slideTableBody');
+      const countEl = document.getElementById('slideCount');
+      tbody.innerHTML = '';
+
+      const toDelete = slides.filter(s => currentDecisions[s.slide_id] === 'delete').length;
+      countEl.textContent = `${toDelete} to delete / ${slides.length} total`;
+
+      slides.forEach(slide => {
+        const decision = currentDecisions[slide.slide_id] || slide.decision;
+        const tr = document.createElement('tr');
+        tr.className = decision === 'delete' ? 'row-delete' : 'row-keep';
+        tr.dataset.slideId = slide.slide_id;
+
+        let labelsHtml = '';
+
+        if (slide.text_markers && slide.text_markers.length > 0) {
+          labelsHtml = slide.text_markers.map(m => {
+            const tierStr = m.tiers.join(', ');
+            const segStr = m.segment ? ` [${m.segment}]` : '';
+            return `<span class="label-pill yellow" title="${escHtml(m.text)}">${escHtml(tierStr)}${escHtml(segStr)}</span>`;
+          }).join('');
+        } else {
+          const redPills = (slide.red_labels || []).map(l =>
+            `<span class="label-pill red" title="${escHtml(l.text)}">${escHtml(l.text.substring(0, 40))}</span>`
+          ).join('');
+          const yellowPills = (slide.yellow_labels || []).map(l =>
+            `<span class="label-pill yellow" title="${escHtml(l.text)}">${escHtml(l.text.substring(0, 40))}</span>`
+          ).join('');
+          labelsHtml = redPills + yellowPills;
+        }
+
+        tr.innerHTML = `
+          <td style="color:var(--text-2)">${slide.index + 1}</td>
+          <td>${escHtml(slide.title || '(untitled)')}</td>
+          <td>${labelsHtml || '<span style="color:var(--text-2)">\u2014</span>'}</td>
+          <td>
+            <div class="decision-toggle">
+              <button type="button" class="${decision === 'keep' ? 'active-keep' : ''}" data-action="keep" data-slide="${slide.slide_id}">Keep</button>
+              <button type="button" class="${decision === 'delete' ? 'active-delete' : ''}" data-action="delete" data-slide="${slide.slide_id}">Delete</button>
+            </div>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+
+      tbody.querySelectorAll('.decision-toggle button').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const slideId = btn.dataset.slide;
+          const action = btn.dataset.action;
+          currentDecisions[slideId] = action;
+
+          const toggle = btn.parentElement;
+          toggle.querySelectorAll('button').forEach(b => { b.className = ''; });
+          btn.className = action === 'keep' ? 'active-keep' : 'active-delete';
+
+          btn.closest('tr').className = action === 'delete' ? 'row-delete' : 'row-keep';
+
+          const total = Object.keys(currentDecisions).length;
+          const del = Object.values(currentDecisions).filter(v => v === 'delete').length;
+          countEl.textContent = `${del} to delete / ${total} total`;
+        });
+      });
+    }
+
+    function renderDebugPanel(entries, thresholds) {
+      const tbody = document.getElementById('debugTableBody');
+      const countEl = document.getElementById('debugCount');
+      const threshInfo = document.getElementById('thresholdInfo');
+      tbody.innerHTML = '';
+      countEl.textContent = `${entries.length} elements`;
+
+      function fmtRange(range) {
+        return `${range[0].toFixed(2)} \u2013 ${range[1].toFixed(2)}`;
+      }
+
+      threshInfo.innerHTML = `
+        <div class="threshold-card">
+          <h4 style="color:var(--red)">Red Label Thresholds</h4>
+          <code>R: ${fmtRange(thresholds.red.r)}<br>G: ${fmtRange(thresholds.red.g)}<br>B: ${fmtRange(thresholds.red.b)}</code>
+        </div>
+        <div class="threshold-card">
+          <h4 style="color:var(--yellow)">Yellow Label Thresholds</h4>
+          <code>R: ${fmtRange(thresholds.yellow.r)}<br>G: ${fmtRange(thresholds.yellow.g)}<br>B: ${fmtRange(thresholds.yellow.b)}</code>
+        </div>
+      `;
+
+      entries.forEach(e => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${e.slide_index + 1}</td>
+          <td><span class="swatch" style="background:${e.hex}"></span></td>
+          <td>${e.rgb.map(v => v.toFixed(3)).join(', ')}</td>
+          <td style="font-family:var(--mono)">${e.hex}</td>
+          <td><span class="match-badge ${e.matched_red ? 'yes' : 'no'}">${e.matched_red ? 'YES' : 'no'}</span></td>
+          <td><span class="match-badge ${e.matched_yellow ? 'yes' : 'no'}">${e.matched_yellow ? 'YES' : 'no'}</span></td>
+          <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(e.text)}">${escHtml(e.text.substring(0, 50))}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    // Phase 2: Execute
+    const executeBtn = document.getElementById('executeBtn');
+    const cancelBtn = document.getElementById('cancelBtn');
+
+    if (executeBtn) {
+      executeBtn.addEventListener('click', async () => {
+        executeBtn.disabled = true;
+        executeBtn.innerHTML = '<span class="spinner"></span> Applying...';
+        errorBanner.classList.add('hidden');
+
+        addProgressStep('Applying slide deletions and label cleanup...', 'active');
+
+        const overrides = {};
+        Object.entries(currentDecisions).forEach(([id, dec]) => {
+          overrides[id] = dec;
+        });
+
+        try {
+          const resp = await fetch('/api/execute', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ job_id: currentJobId, overrides }),
+          });
+          const data = await resp.json();
+
+          const steps = progressLog.querySelectorAll('.step');
+          const lastStep = steps[steps.length - 1];
+          if (lastStep) lastStep.remove();
+
+          if (data.error) {
+            addProgressStep(data.error, 'error');
+            showError(data.error);
+            executeBtn.disabled = false;
+            executeBtn.innerHTML = 'Apply Changes';
+            return;
+          }
+
+          addProgressStep(`Done! ${data.remaining} slides kept, ${data.deleted} deleted.`);
+
+          previewSection.classList.add('hidden');
+          document.getElementById('resultMsg').textContent =
+            `${data.remaining} slides remaining after removing ${data.deleted} slides and all markers.`;
+          document.getElementById('resultLink').href = data.presentation_url;
+          document.getElementById('statRemaining').textContent = data.remaining;
+          document.getElementById('statDeleted').textContent = data.deleted;
+          resultSection.classList.remove('hidden');
+
+        } catch (err) {
+          addProgressStep(err.message, 'error');
+          showError('Network error: ' + err.message);
+          executeBtn.disabled = false;
+          executeBtn.innerHTML = 'Apply Changes';
+        }
+      });
+    }
+
+    if (cancelBtn) {
+      cancelBtn.addEventListener('click', () => {
+        addProgressStep('Cancelled. The duplicated deck was kept with no changes.');
+        previewSection.classList.add('hidden');
+      });
+    }
+  </script>
+</body>
+</html>
