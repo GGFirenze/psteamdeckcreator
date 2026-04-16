@@ -29,6 +29,12 @@ if IS_LOCAL:
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", secrets.token_hex(32))
 
+# Temporary in-memory store for uploaded logo images so the Slides API
+# (which needs a publicly reachable URL) can fetch them from our server.
+_logo_store: dict[str, tuple[bytes, str]] = {}
+
+RENDER_EXTERNAL_URL = os.environ.get("RENDER_EXTERNAL_URL", "http://localhost:5050")
+
 REDIRECT_URI = os.environ.get(
     "GOOGLE_REDIRECT_URI",
     "http://localhost:5050/oauth/callback",
@@ -222,6 +228,18 @@ def api_inspect_raw():
         return jsonify(error=str(e)), 500
 
 
+@app.route("/tmp-image/<token>")
+def serve_tmp_image(token):
+    """Serve a temporarily stored logo image so the Slides API can fetch it."""
+    entry = _logo_store.get(token)
+    if not entry:
+        return "Not found", 404
+    img_bytes, mime = entry
+    return Response(img_bytes, mimetype=mime, headers={
+        "Cache-Control": "public, max-age=300",
+    })
+
+
 @app.route("/api/scan", methods=["POST"])
 def api_scan():
     """Phase 1: duplicate, replace name, optionally replace logo, scan slides."""
@@ -289,10 +307,13 @@ def api_scan():
 
         if logo_bytes:
             progress("Replacing customer logo placeholders...")
+            logo_token = secrets.token_hex(16)
+            _logo_store[logo_token] = (logo_bytes, logo_mime)
+            logo_url = f"{RENDER_EXTERNAL_URL}/tmp-image/{logo_token}"
             engine.replace_customer_logo(
-                slides_svc, drive_svc, new_id,
-                logo_bytes, logo_mime, on_progress=progress,
+                slides_svc, new_id, logo_url, on_progress=progress,
             )
+            _logo_store.pop(logo_token, None)
 
         if is_psp:
             progress("Scanning slides for tier/segment markers...")
