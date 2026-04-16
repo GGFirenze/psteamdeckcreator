@@ -82,7 +82,12 @@ PSP_SEGMENTS = {
 # Each pattern maps to the set of tiers that should KEEP the slide.
 # Matched case-insensitively against the full text of every element on a slide.
 _DELETE_MARKER = re.compile(
-    r"(?:delete before presenting|remove if not (?:applicable|relevant))",
+    r"(?:"
+    r"delete before presenting"
+    r"|remove (?:if not (?:applicable|relevant)|before presenting)"
+    r"|context may not always be available"
+    r"|use this slide to start discussion"
+    r")",
     re.IGNORECASE,
 )
 
@@ -103,10 +108,14 @@ PSP_TIER_RULES = [
     (re.compile(r"for\s+signature\s+customers?\s+only", re.I), {"Signature"}),
     (re.compile(r"for\s+advanced\s+customers?\s+only", re.I), {"Advanced"}),
     (re.compile(r"for\s+basic\s+customers?\s+only", re.I), {"Basic"}),
-    # Roadmap title-based
+    # Roadmap / plan title-based
     (re.compile(r"roadmap\s+for\s+basic\s+plan", re.I), {"Basic"}),
     (re.compile(r"roadmap\s+for\s+advanced\s+plan", re.I), {"Advanced"}),
     (re.compile(r"roadmap\s+for\s+signature\s+plan", re.I), {"Signature"}),
+    # Support team tier-specific slides
+    (re.compile(r"for\s+basic\s+plan\b", re.I), {"Basic"}),
+    (re.compile(r"for\s+advanced\s+plan\b", re.I), {"Advanced"}),
+    (re.compile(r"for\s+signature\s+plan\b", re.I), {"Signature"}),
 ]
 
 # Segment rules for slides 3-6 team composition variants
@@ -123,6 +132,7 @@ class TextMarker:
     text: str
     tiers_that_keep: set
     segment: Optional[str] = None
+    always_remove: bool = False
 
 
 def _scan_psp_markers(slide_elements: list) -> list:
@@ -134,8 +144,9 @@ def _scan_psp_markers(slide_elements: list) -> list:
         if not text:
             continue
 
-        if not _DELETE_MARKER.search(text):
-            # Also check title-based tier markers (roadmap slides)
+        is_delete_marker = _DELETE_MARKER.search(text)
+
+        if not is_delete_marker:
             is_tier_title = False
             for pattern, tiers in PSP_TIER_RULES:
                 if pattern.search(text):
@@ -161,6 +172,13 @@ def _scan_psp_markers(slide_elements: list) -> list:
                 text=text[:200],
                 tiers_that_keep=tiers_keep,
                 segment=segment,
+            ))
+        elif is_delete_marker:
+            markers.append(TextMarker(
+                element_id=eid,
+                text=text[:200],
+                tiers_that_keep=set(),
+                always_remove=True,
             ))
     return markers
 
@@ -200,6 +218,14 @@ def scan_slides_psp(
             if is_yellow_outline(el):
                 info.yellow_outline_elements.append((eid, text))
 
+            highlights = has_yellow_highlight_in_text(el)
+            if highlights:
+                info.yellow_highlights.append((eid, highlights))
+
+            bg = get_element_bg_color(el)
+            if bg and _matches_colour_range(bg, YELLOW_LABEL_COLOUR):
+                info.yellow_labels.append((eid, text))
+
         markers = _scan_psp_markers(elements)
         if markers:
             marker_map[info.slide_id] = markers
@@ -209,9 +235,13 @@ def scan_slides_psp(
 
     if on_progress:
         marked = sum(1 for s in slide_infos if s.slide_id in marker_map)
+        yellow_count = sum(
+            len(s.yellow_labels) + len(s.yellow_highlights) + len(s.yellow_outline_elements)
+            for s in slide_infos
+        )
         on_progress(
             f"Scanned {len(slide_infos)} slides: "
-            f"{marked} with tier/segment markers"
+            f"{marked} with tier/segment markers, {yellow_count} yellow elements"
         )
 
     return slide_infos, marker_map
@@ -236,8 +266,13 @@ def decide_psp_actions(
             decisions[info.slide_id] = "keep"
             continue
 
+        tier_markers = [m for m in markers if not m.always_remove]
+        if not tier_markers:
+            decisions[info.slide_id] = "keep"
+            continue
+
         should_keep = False
-        for m in markers:
+        for m in tier_markers:
             if tier in m.tiers_that_keep:
                 if m.segment and segment:
                     if m.segment == segment:
@@ -277,8 +312,16 @@ def execute_psp_cleanup(
         if decisions.get(info.slide_id) == "keep":
             markers = marker_map.get(info.slide_id, [])
             for m in markers:
-                requests.append({"deleteObject": {"objectId": m.element_id}})
-                deleted_element_ids.add(m.element_id)
+                if m.element_id not in deleted_element_ids:
+                    requests.append({"deleteObject": {"objectId": m.element_id}})
+                    deleted_element_ids.add(m.element_id)
+
+    for info in slide_infos:
+        if decisions.get(info.slide_id) == "keep":
+            for eid, _ in info.yellow_labels:
+                if eid not in deleted_element_ids:
+                    requests.append({"deleteObject": {"objectId": eid}})
+                    deleted_element_ids.add(eid)
 
     for info in slide_infos:
         if decisions.get(info.slide_id) == "keep":
@@ -286,6 +329,28 @@ def execute_psp_cleanup(
                 if eid not in deleted_element_ids:
                     requests.append({"deleteObject": {"objectId": eid}})
                     deleted_element_ids.add(eid)
+
+    for info in slide_infos:
+        if decisions.get(info.slide_id) == "keep":
+            for eid, highlights in info.yellow_highlights:
+                if eid in deleted_element_ids:
+                    continue
+                for te in highlights:
+                    start_idx = te.get("startIndex", 0)
+                    end_idx = te.get("endIndex", start_idx)
+                    if end_idx > start_idx:
+                        requests.append({
+                            "updateTextStyle": {
+                                "objectId": eid,
+                                "textRange": {
+                                    "type": "FIXED_RANGE",
+                                    "startIndex": start_idx,
+                                    "endIndex": end_idx,
+                                },
+                                "style": {"backgroundColor": {}},
+                                "fields": "backgroundColor",
+                            }
+                        })
 
     if not requests:
         if on_progress:
@@ -352,8 +417,9 @@ def has_yellow_highlight_in_text(element) -> list:
     for te in text_elements:
         tr = te.get("textRun", {})
         style = tr.get("style", {})
-        bg = style.get("backgroundColor", {}).get("color", {})
-        if bg and _matches_colour_range(_rgb(bg), YELLOW_LABEL_COLOUR):
+        bg = style.get("backgroundColor", {})
+        color_obj = bg.get("opaqueColor") or bg.get("color") or {}
+        if color_obj and _matches_colour_range(_rgb(color_obj), YELLOW_LABEL_COLOUR):
             highlighted_runs.append(te)
     return highlighted_runs
 
@@ -492,11 +558,17 @@ class SlideInfo:
             "red_labels": [{"id": eid, "text": txt} for eid, txt in self.red_labels],
             "yellow_labels": [{"id": eid, "text": txt} for eid, txt in self.yellow_labels],
             "yellow_highlight_count": len(self.yellow_highlights),
+            "yellow_outline_count": len(self.yellow_outline_elements),
             "has_customer_placeholder": self.has_customer_placeholder,
         }
         if self.text_markers:
             d["text_markers"] = [
-                {"text": m.text[:100], "tiers": sorted(m.tiers_that_keep), "segment": m.segment}
+                {
+                    "text": m.text[:100],
+                    "tiers": sorted(m.tiers_that_keep),
+                    "segment": m.segment,
+                    "guidance_only": m.always_remove,
+                }
                 for m in self.text_markers
             ]
         return d
