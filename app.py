@@ -224,37 +224,44 @@ def api_inspect_raw():
 
 @app.route("/api/scan", methods=["POST"])
 def api_scan():
-    """Phase 1: duplicate, replace name, scan slides. Returns preview data."""
+    """Phase 1: duplicate, replace name, optionally replace logo, scan slides."""
     if not _is_authenticated():
         return jsonify(error="Not authenticated"), 401
 
-    data = request.json
-    template_key = data.get("template", "implementation")
-    customer_name = data.get("customer_name", "").strip()
-    folder_id = data.get("folder_id", "").strip() or None
+    f = request.form
+    template_key = f.get("template", "implementation")
+    customer_name = f.get("customer_name", "").strip()
+    folder_id = f.get("folder_id", "").strip() or None
 
     if not customer_name:
         return jsonify(error="Customer name is required"), 400
 
     template = engine.TEMPLATES.get(template_key)
     if not template:
-        url = data.get("custom_url", "")
+        url = f.get("custom_url", "")
         match = re.search(r"/d/([a-zA-Z0-9_-]+)", url)
         if not match:
             return jsonify(error="Invalid template or URL"), 400
         template = {
             "id": match.group(1),
             "name": "Custom Template",
-            "placeholder": data.get("custom_placeholder", "Customer Name"),
+            "placeholder": f.get("custom_placeholder", "Customer Name"),
             "label_system": "red_and_yellow",
         }
 
     is_psp = template.get("label_system") == "text_markers"
 
     if is_psp:
-        psp_tier = data.get("psp_tier", "").strip()
+        psp_tier = f.get("psp_tier", "").strip()
         if not psp_tier:
             return jsonify(error="PSP Tier is required"), 400
+
+    logo_file = request.files.get("customer_logo")
+    logo_bytes = None
+    logo_mime = None
+    if logo_file and logo_file.filename:
+        logo_bytes = logo_file.read()
+        logo_mime = logo_file.content_type or "image/png"
 
     slides_svc, drive_svc = _get_services()
 
@@ -280,14 +287,21 @@ def api_scan():
             customer_name, on_progress=progress,
         )
 
+        if logo_bytes:
+            progress("Replacing customer logo placeholders...")
+            engine.replace_customer_logo(
+                slides_svc, drive_svc, new_id,
+                logo_bytes, logo_mime, on_progress=progress,
+            )
+
         if is_psp:
             progress("Scanning slides for tier/segment markers...")
             slide_infos, marker_map = engine.scan_slides_psp(
                 slides_svc, new_id, on_progress=progress
             )
 
-            psp_tier = data.get("psp_tier")
-            psp_segment = data.get("psp_segment") or None
+            psp_tier = f.get("psp_tier")
+            psp_segment = f.get("psp_segment") or None
             decisions = engine.decide_psp_actions(
                 slide_infos, marker_map, psp_tier, psp_segment
             )
@@ -327,11 +341,11 @@ def api_scan():
             )
 
             config = {
-                "sdk_types": data.get("sdk_types", []),
-                "import_sources": data.get("import_sources", []),
-                "tag_managers": data.get("tag_managers", []),
-                "third_party": data.get("third_party", False),
-                "mobile_autocapture": data.get("mobile_autocapture", False),
+                "sdk_types": f.getlist("sdk_types"),
+                "import_sources": f.getlist("import_sources"),
+                "tag_managers": f.getlist("tag_managers"),
+                "third_party": bool(f.get("third_party")),
+                "mobile_autocapture": bool(f.get("mobile_autocapture")),
             }
             keep_kw, remove_kw = engine.build_keep_remove_keywords(config)
             decisions = engine.decide_slide_actions(slide_infos, keep_kw, remove_kw)

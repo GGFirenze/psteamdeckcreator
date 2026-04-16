@@ -16,6 +16,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow, Flow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
+from googleapiclient.http import MediaInMemoryUpload
 
 SCOPES = [
     "https://www.googleapis.com/auth/presentations",
@@ -185,6 +186,7 @@ def scan_slides_psp(
         elements = slide.get("pageElements", [])
 
         for el in elements:
+            eid = el["objectId"]
             text = get_element_text(el)
             if text and not info.title:
                 shape = el.get("shape", {})
@@ -195,6 +197,8 @@ def scan_slides_psp(
                     info.title = text[:80]
             if "{Customer}" in text or "[Customer]" in text:
                 info.has_customer_placeholder = True
+            if is_yellow_outline(el):
+                info.yellow_outline_elements.append((eid, text))
 
         markers = _scan_psp_markers(elements)
         if markers:
@@ -267,11 +271,21 @@ def execute_psp_cleanup(
     for info in slides_to_delete:
         requests.append({"deleteObject": {"objectId": info.slide_id}})
 
+    deleted_element_ids = set()
+
     for info in slide_infos:
         if decisions.get(info.slide_id) == "keep":
             markers = marker_map.get(info.slide_id, [])
             for m in markers:
                 requests.append({"deleteObject": {"objectId": m.element_id}})
+                deleted_element_ids.add(m.element_id)
+
+    for info in slide_infos:
+        if decisions.get(info.slide_id) == "keep":
+            for eid, _ in info.yellow_outline_elements:
+                if eid not in deleted_element_ids:
+                    requests.append({"deleteObject": {"objectId": eid}})
+                    deleted_element_ids.add(eid)
 
     if not requests:
         if on_progress:
@@ -281,7 +295,7 @@ def execute_psp_cleanup(
     if on_progress:
         on_progress(
             f"Executing batch update: {len(slides_to_delete)} slide deletions, "
-            f"{len(requests) - len(slides_to_delete)} marker removals"
+            f"{len(requests) - len(slides_to_delete)} marker/label removals"
         )
 
     result = slides_service.presentations().batchUpdate(
@@ -342,6 +356,25 @@ def has_yellow_highlight_in_text(element) -> list:
         if bg and _matches_colour_range(_rgb(bg), YELLOW_LABEL_COLOUR):
             highlighted_runs.append(te)
     return highlighted_runs
+
+
+YELLOW_OUTLINE_COLOUR = {"r": (0.9, 1.01), "g": (0.9, 1.01), "b": (0.0, 0.1)}
+
+
+def get_element_outline_color(element) -> Optional[tuple]:
+    shape = element.get("shape", {})
+    outline = shape.get("shapeProperties", {}).get("outline", {})
+    fill = outline.get("outlineFill", {}).get("solidFill", {}).get("color", {})
+    if fill:
+        return _rgb(fill)
+    return None
+
+
+def is_yellow_outline(element) -> bool:
+    rgb = get_element_outline_color(element)
+    if not rgb:
+        return False
+    return _matches_colour_range(rgb, YELLOW_OUTLINE_COLOUR)
 
 
 # ---------------------------------------------------------------------------
@@ -445,6 +478,7 @@ class SlideInfo:
     red_labels: list = field(default_factory=list)
     yellow_labels: list = field(default_factory=list)
     yellow_highlights: list = field(default_factory=list)
+    yellow_outline_elements: list = field(default_factory=list)
     has_customer_placeholder: bool = False
 
     # Attached by PSP scan (not set by default)
@@ -526,6 +560,67 @@ def replace_customer_name(
     return total_replaced
 
 
+def replace_customer_logo(
+    slides_service,
+    drive_service,
+    presentation_id: str,
+    logo_bytes: bytes,
+    logo_mime: str,
+    on_progress: Callable = None,
+) -> int:
+    """Upload logo to Drive and replace all 'Customer Logo' placeholder shapes.
+
+    Returns the number of occurrences replaced.
+    """
+    media = MediaInMemoryUpload(logo_bytes, mimetype=logo_mime, resumable=False)
+    file_meta = {"name": "customer_logo_temp", "mimeType": logo_mime}
+    uploaded = drive_service.files().create(
+        body=file_meta, media_body=media, fields="id",
+    ).execute()
+    file_id = uploaded["id"]
+
+    drive_service.permissions().create(
+        fileId=file_id,
+        body={"role": "reader", "type": "anyone"},
+    ).execute()
+
+    image_url = f"https://drive.google.com/uc?id={file_id}"
+
+    logo_placeholders = ["Customer Logo"]
+    total = 0
+    for ph in logo_placeholders:
+        req = {
+            "replaceAllShapesWithImage": {
+                "imageUrl": image_url,
+                "imageReplaceMethod": "CENTER_INSIDE",
+                "containsText": {"text": ph, "matchCase": False},
+            }
+        }
+        try:
+            result = slides_service.presentations().batchUpdate(
+                presentationId=presentation_id,
+                body={"requests": [req]},
+            ).execute()
+            count = result.get("replies", [{}])[0].get(
+                "replaceAllShapesWithImage", {}
+            ).get("occurrencesChanged", 0)
+            if count > 0:
+                total += count
+                if on_progress:
+                    on_progress(f"Replaced '{ph}' with logo image ({count} occurrences)")
+        except HttpError:
+            pass
+
+    try:
+        drive_service.files().delete(fileId=file_id).execute()
+    except HttpError:
+        pass
+
+    if total == 0 and on_progress:
+        on_progress("Warning: no 'Customer Logo' placeholders found to replace")
+    return total
+
+
 def scan_slides(
     slides_service,
     presentation_id: str,
@@ -574,6 +669,9 @@ def scan_slides(
             highlights = has_yellow_highlight_in_text(element)
             if highlights:
                 info.yellow_highlights.append((eid, highlights))
+
+            if is_yellow_outline(element):
+                info.yellow_outline_elements.append((eid, text))
 
             if "[Customer]" in text or "{Customer}" in text:
                 info.has_customer_placeholder = True
@@ -704,6 +802,11 @@ def execute_deletions_and_cleanup(
                                 "fields": "backgroundColor",
                             }
                         })
+
+    for info in slide_infos:
+        if decisions.get(info.slide_id) == "keep":
+            for eid, _ in info.yellow_outline_elements:
+                requests.append({"deleteObject": {"objectId": eid}})
 
     if not requests:
         if on_progress:

@@ -554,6 +554,11 @@
         </div>
 
         <div class="form-full">
+          <label for="customer_logo">Customer Logo <span style="font-weight:400;color:var(--text-2)">(optional — replaces "Customer Logo" placeholders)</span></label>
+          <input type="file" id="customer_logo" name="customer_logo" accept="image/png,image/jpeg,image/svg+xml,image/webp" style="padding:8px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-size:14px;width:100%;">
+        </div>
+
+        <div class="form-full">
           <label for="folder_id">Google Drive Folder ID <span style="font-weight:400;color:var(--text-2)">(optional)</span></label>
           <input type="text" id="folder_id" name="folder_id" placeholder="Leave blank for My Drive root">
         </div>
@@ -737,31 +742,34 @@
 
         const loadingStep = addProgressStep('Starting deck creation...', 'active');
 
-        const payload = {
-          template: templateSelect.value,
-          customer_name: document.getElementById('customer_name').value,
-          folder_id: document.getElementById('folder_id').value,
-        };
+        const fd = new FormData();
+        fd.append('template', templateSelect.value);
+        fd.append('customer_name', document.getElementById('customer_name').value);
+        fd.append('folder_id', document.getElementById('folder_id').value);
+
+        const logoInput = document.getElementById('customer_logo');
+        if (logoInput?.files?.length) {
+          fd.append('customer_logo', logoInput.files[0]);
+        }
 
         if (templateSelect.value === 'psp_kickoff') {
-          payload.psp_tier = document.getElementById('psp_tier').value;
-          payload.psp_segment = document.getElementById('psp_segment').value;
+          fd.append('psp_tier', document.getElementById('psp_tier').value);
+          fd.append('psp_segment', document.getElementById('psp_segment').value);
         } else if (templateSelect.value === 'custom') {
-          payload.custom_url = document.getElementById('custom_url')?.value || '';
-          payload.custom_placeholder = document.getElementById('custom_placeholder')?.value || '';
+          fd.append('custom_url', document.getElementById('custom_url')?.value || '');
+          fd.append('custom_placeholder', document.getElementById('custom_placeholder')?.value || '');
         } else {
-          payload.sdk_types = getCheckedValues('sdk_types');
-          payload.import_sources = getCheckedValues('import_sources');
-          payload.tag_managers = getCheckedValues('tag_managers');
-          payload.third_party = document.getElementById('third_party')?.checked || false;
-          payload.mobile_autocapture = document.getElementById('mobile_autocapture')?.checked || false;
+          getCheckedValues('sdk_types').forEach(v => fd.append('sdk_types', v));
+          getCheckedValues('import_sources').forEach(v => fd.append('import_sources', v));
+          getCheckedValues('tag_managers').forEach(v => fd.append('tag_managers', v));
+          fd.append('third_party', document.getElementById('third_party')?.checked ? '1' : '');
+          fd.append('mobile_autocapture', document.getElementById('mobile_autocapture')?.checked ? '1' : '');
         }
 
         try {
           const resp = await fetch('/api/scan', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
+            body: fd,
           });
           const data = await resp.json();
 
